@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>NEWS-COMMAND v2.0 // Pro TV Studio</title>
+<title>NEWS-COMMAND v2.1 // Pro TV Studio</title>
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <style>
 :root{--bg:#05080f;--panel:#0c1220;--red:#ff1e42;--cyan:#00e5ff;--amber:#ffb300;--green:#00e676;--txt:#f0f6fc;--mut:#7d8da6;--bd:#1c2a44}
@@ -21,7 +21,7 @@ canvas#pgm{width:100%;display:block;background:#020408}
 .card{background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:11px;margin-bottom:10px}
 .ctitle{font-size:.73rem;color:var(--cyan);font-weight:bold;margin-bottom:8px;letter-spacing:.4px;display:flex;justify-content:space-between;align-items:center}
 .row{display:flex;gap:7px;margin-bottom:8px}
-.btn{flex:1;padding:9px 5px;border-radius:6px;font-size:.73rem;font-weight:bold;cursor:pointer;border:1px solid var(--cyan);background:rgba(0,229,255,.12);color:var(--cyan);transition:.15s;text-align:center}
+.btn{flex:1;padding:9px 5px;border-radius:6px;font-size:.73rem;font-weight:bold;cursor:pointer;border:1px solid var(--cyan);background:rgba(0,229,255,.12);color:var(--cyan);transition:.15s;text-align:center;user-select:none}
 .btn:active{transform:scale(.97)}
 .btn.on{background:var(--cyan);color:#000}
 .btn-r{border-color:var(--red);background:rgba(255,30,66,.16);color:var(--red)}
@@ -41,7 +41,7 @@ input[type=file]{display:none}
 <body>
 
 <header>
-  <div><div class="brand">📡 NEWS-COMMAND v2.0</div><div class="sub">PRO TV BROADCAST & AUDIO MIXER</div></div>
+  <div><div class="brand">📡 NEWS-COMMAND v2.1</div><div class="sub">PRO TV BROADCAST & AUDIO MIXER</div></div>
   <div class="badge" id="statusBadge">STANDBY</div>
 </header>
 
@@ -73,7 +73,7 @@ input[type=file]{display:none}
       <button class="btn btn-g" onclick="takeSnapshot()">📸 নিউজ কার্ড</button>
     </div>
     <div class="row">
-      <button class="btn btn-a" onclick="flipStudioCam()">🔄 ক্যামেরা</button>
+      <button class="btn btn-a" onclick="flipStudioCam()">🔄 ক্যামেরা বদল</button>
       <button class="btn" id="mirrorBtn" onclick="toggleMirror()">🪞 মিরর: OFF</button>
       <button class="btn" id="ratioBtn" onclick="toggleRatio()">📐 16:9 টিভি</button>
     </div>
@@ -86,15 +86,15 @@ input[type=file]{display:none}
     <div class="row">
       <button class="btn btn-a" id="bedBtn" onclick="toggleNewsBed()">🎵 টিভি নিউজ বেড: OFF</button>
       <label class="btn" for="bgmFile">📂 MP3 মিউজিক লোড</label>
-      <input type="file" id="bgmFile" accept="audio/*" onchange="loadCustomBGM(this)">
+      <input type="file" id="bgmFile" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg" onchange="loadCustomBGM(this)">
     </div>
     <div class="row">
       <button class="btn" id="mp3PlayBtn" onclick="toggleCustomBGM()" style="display:none">▶ MP3 প্লে</button>
       <button class="btn btn-r" onclick="playBreakingSting()">🚨 ব্রেকিং অ্যালার্ট সাউন্ড</button>
     </div>
     <div class="srow">
-      <span>ব্যাকগ্রাউন্ড ভলিউম: <b id="volLbl" style="color:var(--cyan)">25%</b></span>
-      <input type="range" id="bgmVol" min="0" max="100" value="25" oninput="updateBGMVol(this.value)">
+      <span>ব্যাকগ্রাউন্ড ভলিউম: <b id="volLbl" style="color:var(--cyan)">30%</b></span>
+      <input type="range" id="bgmVol" min="0" max="100" value="30" oninput="updateBGMVol(this.value)">
     </div>
   </div>
 
@@ -149,7 +149,7 @@ input[type=file]{display:none}
 
 <video id="hostVid" autoplay playsinline muted style="display:none"></video>
 <video id="remoteVid" autoplay playsinline style="display:none"></video>
-<audio id="bgmAudio" loop crossorigin="anonymous"></audio>
+<audio id="bgmAudio" loop></audio>
 
 <script>
 const params=new URLSearchParams(location.search);
@@ -159,8 +159,7 @@ let facing='user',gFacing='environment',isVertical=false,splitMode=false,mirrorH
 let showName=true,showBRoll=false,brollImg=null,logoImg=null;
 let recorder=null,chunks=[],isRec=false,tickerX=720,tpOn=false,tpY=45;
 
-// Audio Engine Variables
-let actx=null,mixDest=null,bgmGain=null,bedGain=null,bedOn=false,bedTimer=null,mp3Playing=false,micAnalyser=null,micData=null;
+let actx=null,mixDest=null,bgmGain=null,bedGain=null,bedOn=false,bedTimer=null,mp3Playing=false,micAnalyser=null,micData=null,elConnected=false;
 
 const cvs=document.getElementById('pgm'),ctx=cvs.getContext('2d');
 const hVid=document.getElementById('hostVid'),rVid=document.getElementById('remoteVid'),bgmEl=document.getElementById('bgmAudio');
@@ -175,7 +174,6 @@ if(guestTarget){
   requestAnimationFrame(renderBroadcast);
 }
 
-// --- AUDIO ENGINE & TV NEWS BED ---
 function ensureAudio(){
   if(!actx){
     actx=new(window.AudioContext||window.webkitAudioContext)();
@@ -184,26 +182,22 @@ function ensureAudio(){
     bedGain=actx.createGain();
     const vol=parseInt(document.getElementById('bgmVol').value)/100;
     bgmGain.gain.value=vol;
-    bedGain.gain.value=vol*0.7;
+    bedGain.gain.value=vol*0.75;
     bgmGain.connect(actx.destination);
     bgmGain.connect(mixDest);
     bedGain.connect(actx.destination);
     bedGain.connect(mixDest);
-    try{
-      const elSrc=actx.createMediaElementSource(bgmEl);
-      elSrc.connect(bgmGain);
-    }catch(e){}
   }
   if(actx.state==='suspended')actx.resume();
 }
 
 function updateBGMVol(v){
   document.getElementById('volLbl').innerText=v+'%';
-  if(bgmGain)bgmGain.gain.setTargetAtTime(v/100,actx.currentTime,0.05);
-  if(bedGain)bedGain.gain.setTargetAtTime((v/100)*0.7,actx.currentTime,0.05);
+  bgmEl.volume=v/100;
+  if(bgmGain&&actx)bgmGain.gain.setTargetAtTime(v/100,actx.currentTime,0.05);
+  if(bedGain&&actx)bedGain.gain.setTargetAtTime((v/100)*0.75,actx.currentTime,0.05);
 }
 
-// Continuous TV Newsroom Pulse Bed
 function toggleNewsBed(){
   ensureAudio();
   const btn=document.getElementById('bedBtn');
@@ -217,18 +211,16 @@ function toggleNewsBed(){
   const playTick=()=>{
     if(!bedOn)return;
     const now=actx.currentTime;
-    // Deep Broadcast Sub-Bass Pulse
     if(step%4===0){
       const sub=actx.createOscillator(),sg=actx.createGain();
-      sub.type='triangle';sub.frequency.setValueAtTime(65.41,now); // C2
+      sub.type='triangle';sub.frequency.setValueAtTime(65.41,now);
       sg.gain.setValueAtTime(0.45,now);sg.gain.exponentialRampToValueAtTime(0.001,now+0.42);
       sub.connect(sg);sg.connect(bedGain);sub.start(now);sub.stop(now+0.43);
     }
-    // Crisp Newsroom Telemetry Tick
     const notes=[523.25,659.25,783.99,659.25,587.33,783.99,880,783.99];
     const osc=actx.createOscillator(),og=actx.createGain();
     osc.type='sine';osc.frequency.setValueAtTime(notes[step%notes.length],now);
-    og.gain.setValueAtTime(step%2===0?0.14:0.07,now);
+    og.gain.setValueAtTime(step%2===0?0.15:0.08,now);
     og.gain.exponentialRampToValueAtTime(0.001,now+0.12);
     osc.connect(og);og.connect(bedGain);osc.start(now);osc.stop(now+0.13);
     step++;
@@ -240,10 +232,20 @@ function toggleNewsBed(){
 function loadCustomBGM(inp){
   if(!inp.files||!inp.files[0])return;
   ensureAudio();
+  if(!elConnected){
+    try{
+      const elSrc=actx.createMediaElementSource(bgmEl);
+      elSrc.connect(bgmGain);
+      elConnected=true;
+    }catch(e){}
+  }
   bgmEl.src=URL.createObjectURL(inp.files[0]);
-  bgmEl.play();mp3Playing=true;
-  const b=document.getElementById('mp3PlayBtn');
-  b.style.display='block';b.innerText='⏸ MP3 পজ';b.classList.add('on');
+  bgmEl.volume=parseInt(document.getElementById('bgmVol').value)/100;
+  bgmEl.play().then(()=>{
+    mp3Playing=true;
+    const b=document.getElementById('mp3PlayBtn');
+    b.style.display='block';b.innerText='⏸ MP3 পজ';b.classList.add('on');
+  }).catch(err=>alert('অডিও চালু করতে ▶ MP3 প্লে বাটনে চাপ দিন।'));
 }
 
 function toggleCustomBGM(){
@@ -260,14 +262,13 @@ function playBreakingSting(){
   chord.forEach((f,i)=>{
     const o=actx.createOscillator(),g=actx.createGain();
     o.type='sawtooth';o.frequency.setValueAtTime(f,now+i*0.05);
-    g.gain.setValueAtTime(0.18,now+i*0.05);
+    g.gain.setValueAtTime(0.2,now+i*0.05);
     g.gain.exponentialRampToValueAtTime(0.001,now+i*0.05+0.55);
     o.connect(g);g.connect(actx.destination);if(mixDest)g.connect(mixDest);
     o.start(now+i*0.05);o.stop(now+i*0.05+0.56);
   });
 }
 
-// --- MEDIA OVERLAYS ---
 function loadBRoll(inp){
   if(!inp.files||!inp.files[0])return;
   const img=new Image();
@@ -293,7 +294,6 @@ function loadLogo(inp){
   img.src=URL.createObjectURL(inp.files[0]);
 }
 
-// --- WEBRTC STUDIO & GUEST ---
 function initStudioPeer(){
   const roomId='NEWS-'+Math.random().toString(36).substring(2,7).toUpperCase();
   peer=new Peer(roomId);
@@ -319,8 +319,12 @@ function initStudioPeer(){
 }
 
 function copyInvite(){
-  navigator.clipboard.writeText(document.getElementById('inviteLink').innerText);
-  alert('গেস্ট লিংক কপি হয়েছে! রিপোর্টার বা অতিথিকে পাঠান।');
+  const txt=document.getElementById('inviteLink').innerText;
+  if(navigator.clipboard){
+    navigator.clipboard.writeText(txt).then(()=>alert('গেস্ট লিংক কপি হয়েছে!'));
+  }else{
+    prompt('লিংকটি কপি করুন:',txt);
+  }
 }
 
 function dropGuest(){
@@ -348,10 +352,34 @@ async function startGuestUplink(){
 
 async function flipGuestCam(){
   gFacing=gFacing==='environment'?'user':'environment';
-  if(gStream)await startGuestUplink();
+  if(gStream){
+    gStream.getTracks().forEach(t=>t.stop());
+    await new Promise(r=>setTimeout(r,350));
+    await startGuestUplink();
+  }
 }
 
-// --- CAMERA & CONTROLS ---
+async function startCameraStream(){
+  ensureAudio();
+  try{
+    hostStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:1280},height:{ideal:720}},audio:true});
+  }catch(e){
+    const devs=await navigator.mediaDevices.enumerateDevices();
+    const cams=devs.filter(d=>d.kind==='videoinput');
+    const tgt=facing==='environment'?cams[cams.length-1]:cams[0];
+    hostStream=await navigator.mediaDevices.getUserMedia({video:tgt?{deviceId:{exact:tgt.deviceId}}:true,audio:true});
+  }
+  hVid.srcObject=hostStream;await hVid.play();
+  const micSrc=actx.createMediaStreamSource(hostStream);
+  micSrc.connect(mixDest);
+  micAnalyser=actx.createAnalyser();micAnalyser.fftSize=256;
+  micSrc.connect(micAnalyser);
+  micData=new Uint8Array(micAnalyser.frequencyBinCount);
+  const btn=document.getElementById('camBtn');
+  btn.innerText='⏹️ ক্যামেরা বন্ধ';btn.classList.add('on');
+  document.getElementById('statusBadge').innerText='● ON AIR';
+}
+
 async function toggleStudioCam(){
   const btn=document.getElementById('camBtn');
   if(hostStream){
@@ -361,22 +389,17 @@ async function toggleStudioCam(){
     return;
   }
   try{
-    ensureAudio();
-    hostStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:1280},height:{ideal:720}},audio:true});
-    hVid.srcObject=hostStream;await hVid.play();
-    const micSrc=actx.createMediaStreamSource(hostStream);
-    micSrc.connect(mixDest);
-    micAnalyser=actx.createAnalyser();micAnalyser.fftSize=256;
-    micSrc.connect(micAnalyser);
-    micData=new Uint8Array(micAnalyser.frequencyBinCount);
-    btn.innerText='⏹️ ক্যামেরা বন্ধ';btn.classList.add('on');
-    document.getElementById('statusBadge').innerText='● ON AIR';
-  }catch(e){alert('ক্যামেরা ও মাইক্রোফোন পারমিশন দিন।');}
+    await startCameraStream();
+  }catch(e){alert('ক্যামেরা ও মাইক্রোফোন পারমিশন Allow করুন।');}
 }
 
 async function flipStudioCam(){
   facing=facing==='user'?'environment':'user';
-  if(hostStream){await toggleStudioCam();await toggleStudioCam();}
+  if(hostStream){
+    hostStream.getTracks().forEach(t=>t.stop());hostStream=null;
+    await new Promise(r=>setTimeout(r,400));
+    try{await startCameraStream();}catch(e){alert('ক্যামেরা পরিবর্তন করতে আবার ক্যামেরা চালু বাটনে চাপ দিন।');}
+  }
 }
 
 function toggleMirror(){
@@ -409,7 +432,6 @@ function togglePrompter(){
   tpY=55;
 }
 
-// --- LIVE RENDER COMPOSITOR ---
 function drawCover(src,x,y,w,h,mirror=false){
   const sw=src.videoWidth||src.width,sh=src.videoHeight||src.height;
   if(!sw||!sh){
@@ -429,7 +451,6 @@ function renderBroadcast(){
   const W=cvs.width,H=cvs.height;
   ctx.fillStyle='#04070d';ctx.fillRect(0,0,W,H);
 
-  // Auto-Ducking Check
   if(micAnalyser&&actx){
     micAnalyser.getByteFrequencyData(micData);
     let sum=0;for(let i=0;i<micData.length;i++)sum+=micData[i];
@@ -437,10 +458,9 @@ function renderBroadcast(){
     const baseVol=parseInt(document.getElementById('bgmVol').value)/100;
     const targetVol=avg>18?baseVol*0.22:baseVol;
     if(bgmGain)bgmGain.gain.setTargetAtTime(targetVol,actx.currentTime,0.12);
-    if(bedGain)bedGain.gain.setTargetAtTime(targetVol*0.7,actx.currentTime,0.12);
+    if(bedGain)bedGain.gain.setTargetAtTime(targetVol*0.75,actx.currentTime,0.12);
   }
 
-  // 1. Video / B-Roll Layers
   if(remoteStream&&splitMode){
     if(isVertical){
       drawCover(hVid,0,0,W,H/2,mirrorHost);
@@ -471,7 +491,6 @@ function renderBroadcast(){
     }
   }
 
-  // 2. Top-Left LIVE Badge & Clock
   ctx.fillStyle='#ff1e42';ctx.fillRect(14,14,62,26);
   ctx.fillStyle='#fff';ctx.font='bold 14px sans-serif';ctx.fillText('● LIVE',21,32);
 
@@ -479,7 +498,6 @@ function renderBroadcast(){
   ctx.fillStyle='rgba(6,10,18,0.85)';ctx.fillRect(76,14,88,26);
   ctx.fillStyle='#00e5ff';ctx.font='bold 13px monospace';ctx.fillText(timeStr,83,31);
 
-  // 3. Top-Right Logo / Channel Name & Location
   const ch=(document.getElementById('chName').value||'PATHIK TV').toUpperCase();
   const loc=document.getElementById('locName').value||'';
   if(logoImg){
@@ -495,7 +513,6 @@ function renderBroadcast(){
     ctx.fillStyle='#fff';ctx.font='bold 10px sans-serif';ctx.fillText('📍 '+loc,W-148,ly+12);
   }
 
-  // 4. Lower-Thirds (Name Tag + Headline + Ticker)
   const barH=32,hlH=42,hlY=H-barH-hlH;
   if(showName){
     const an=document.getElementById('anchorName').value||'';
@@ -526,7 +543,59 @@ function renderBroadcast(){
   if(tickerX<105-tw)tickerX=W;
   ctx.restore();
 
-  // 5. Teleprompter
   if(tpOn){
     const txtEl=document.getElementById('prompterTxt');
-    txtEl.innerText=document.getElementById('scriptInput').
+    txtEl.innerText=document.getElementById('scriptInput').value;
+    tpY-=parseInt(document.getElementById('tpSpeed').value)*0.22;
+    if(tpY<-txtEl.offsetHeight)tpY=65;
+    txtEl.style.transform=`translateY(${tpY}px)`;
+  }
+
+  requestAnimationFrame(renderBroadcast);
+}
+
+function takeSnapshot(){
+  const url=cvs.toDataURL('image/png');
+  const dl=document.getElementById('dlArea');
+  dl.style.display='block';
+  dl.innerHTML=`<a href="${url}" download="NEWS_CARD_${Date.now()}.png" style="display:block;text-align:center;padding:9px;background:#00e5ff;color:#000;font-weight:bold;border-radius:6px;text-decoration:none;font-size:.8rem">⬇ ব্রেকিং নিউজ কার্ড (PNG) ডাউনলোড করুন</a>`;
+}
+
+function toggleRecord(){
+  const btn=document.getElementById('recBtn');
+  if(isRec){
+    recorder.stop();isRec=false;
+    btn.innerText='🔴 REC ভিডিও';btn.classList.remove('on');
+    return;
+  }
+  ensureAudio();
+  const cStream=cvs.captureStream(30);
+  if(mixDest&&mixDest.stream.getAudioTracks().length>0){
+    mixDest.stream.getAudioTracks().forEach(t=>cStream.addTrack(t));
+  }
+  chunks=[];
+  const types=['video/webm;codecs=vp8,opus','video/webm','video/mp4',''];
+  let opt={};
+  for(const t of types){
+    if(!t||MediaRecorder.isTypeSupported(t)){opt=t?{mimeType:t}:{};break;}
+  }
+  try{
+    recorder=new MediaRecorder(cStream,opt);
+  }catch(e){
+    recorder=new MediaRecorder(cvs.captureStream(30));
+  }
+  recorder.ondataavailable=e=>{if(e.data&&e.data.size>0)chunks.push(e.data);};
+  recorder.onstop=()=>{
+    const ext=(recorder.mimeType||'').includes('mp4')?'mp4':'webm';
+    const blob=new Blob(chunks,{type:recorder.mimeType||'video/webm'});
+    const url=URL.createObjectURL(blob);
+    const dl=document.getElementById('dlArea');
+    dl.style.display='block';
+    dl.innerHTML=`<a href="${url}" download="TV_BROADCAST_${Date.now()}.${ext}" style="display:block;text-align:center;padding:9px;background:#00e676;color:#000;font-weight:bold;border-radius:6px;text-decoration:none;font-size:.8rem">⬇ রেকর্ড করা নিউজ ভিডিও ডাউনলোড করুন</a>`;
+  };
+  recorder.start(500);isRec=true;
+  btn.innerText='⏹️ রেকর্ডিং সেভ করুন';btn.classList.add('on');
+}
+</script>
+</body>
+</html>
