@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>NEWS-COMMAND // Mobile Broadcast Studio</title>
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<style>
+:root{--bg:#06090f;--panel:#0d131f;--red:#ff1e42;--cyan:#00e5ff;--amber:#ffb300;--txt:#f0f6fc;--mut:#7d8da6;--bd:#1d2b44}
+*{box-sizing:border-box;font-family:'Segoe UI',Tahoma,sans-serif}
+body{margin:0;background:var(--bg);color:var(--txt);padding-bottom:40px}
+header{background:var(--panel);padding:10px 14px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:50}
+.brand{font-size:.95rem;font-weight:800;color:var(--cyan);letter-spacing:.5px}
+.sub{font-size:.64rem;color:var(--mut);font-family:monospace}
+.badge{font-size:.68rem;padding:4px 8px;border-radius:4px;border:1px solid var(--red);color:var(--red);background:rgba(255,30,66,.12);font-weight:bold}
+.wrap{max-width:540px;margin:0 auto;padding:10px}
+.monitor{position:relative;width:100%;background:#000;border:2px solid var(--bd);border-radius:8px;overflow:hidden;margin-bottom:10px;box-shadow:0 0 25px rgba(0,229,255,.12)}
+canvas#pgm{width:100%;display:block;background:#020408}
+.prompter{position:absolute;top:36px;left:8%;right:8%;height:68px;background:rgba(0,0,0,.62);border:1px solid rgba(0,229,255,.35);border-radius:6px;overflow:hidden;padding:6px 10px;pointer-events:none;display:none}
+.prompter-txt{color:#fff;font-size:.95rem;line-height:1.45;font-weight:600;text-align:center;transform:translateY(40px)}
+.card{background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:11px;margin-bottom:10px}
+.ctitle{font-size:.73rem;color:var(--cyan);font-weight:bold;margin-bottom:8px;letter-spacing:.5px;display:flex;justify-content:space-between}
+.row{display:flex;gap:7px;margin-bottom:8px}
+.btn{flex:1;padding:10px 6px;border-radius:6px;font-size:.75rem;font-weight:bold;cursor:pointer;border:1px solid var(--cyan);background:rgba(0,229,255,.12);color:var(--cyan);transition:.15s}
+.btn:active{transform:scale(.97)}
+.btn.on{background:var(--cyan);color:#000}
+.btn-r{border-color:var(--red);background:rgba(255,30,66,.16);color:var(--red)}
+.btn-r.on{background:var(--red);color:#fff;animation:pulse 1.2s infinite}
+.btn-a{border-color:var(--amber);background:rgba(255,179,0,.14);color:var(--amber)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.65}}
+input[type=text],textarea,select{width:100%;background:#05080e;border:1px solid var(--bd);color:#fff;padding:8px 10px;border-radius:6px;font-size:.78rem;margin-bottom:7px}
+.srow{display:flex;align-items:center;gap:8px;font-size:.72rem;color:var(--mut)}
+.srow input{flex:1;accent-color:var(--cyan)}
+.linkbox{background:#04070c;border:1px dashed var(--cyan);padding:8px;border-radius:6px;font-size:.7rem;word-break:break-all;color:var(--cyan);margin-bottom:7px;font-family:monospace}
+.guest-view{display:none;text-align:center;padding:20px 12px}
+</style>
+</head>
+<body>
+
+<header>
+  <div><div class="brand">📡 NEWS-COMMAND v1.0</div><div class="sub">LIVE BROADCAST & REMOTE UPLINK</div></div>
+  <div class="badge" id="statusBadge">STANDBY</div>
+</header>
+
+<!-- GUEST / FIELD REPORTER VIEW -->
+<div class="wrap guest-view" id="guestView">
+  <div class="card">
+    <div class="ctitle"><span>🎥 FIELD REPORTER LIVE UPLINK</span><span id="gStatus" style="color:var(--amber)">CONNECTING...</span></div>
+    <video id="gLocalVid" autoplay playsinline muted style="width:100%;border-radius:6px;background:#000;border:1px solid var(--cyan);margin-bottom:10px"></video>
+    <div class="row">
+      <button class="btn on" id="gStartBtn" onclick="startGuestUplink()">📡 স্টুডিওতে লাইভ যুক্ত হন</button>
+      <button class="btn btn-a" onclick="flipGuestCam()">🔄 ক্যামেরা</button>
+    </div>
+    <div style="font-size:.72rem;color:var(--mut)">আপনার ভিডিও ও অডিও সরাসরি কন্ট্রোল রুমে সম্প্রচারিত হচ্ছে।</div>
+  </div>
+</div>
+
+<!-- COMMANDER STUDIO VIEW -->
+<div class="wrap" id="studioView">
+  <div class="monitor">
+    <canvas id="pgm" width="720" height="405"></canvas>
+    <div class="prompter" id="prompterBox"><div class="prompter-txt" id="prompterTxt"></div></div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <button class="btn" id="camBtn" onclick="toggleStudioCam()">🎥 ক্যামেরা চালু</button>
+      <button class="btn btn-r" id="recBtn" onclick="toggleRecord()">🔴 REC ব্রডকাস্ট</button>
+      <button class="btn btn-a" onclick="flipStudioCam()">🔄 ফ্লিপ</button>
+    </div>
+    <div class="row">
+      <button class="btn" id="ratioBtn" onclick="toggleRatio()">📐 16:9 টিভি মোড</button>
+      <button class="btn" id="layoutBtn" onclick="toggleLayout()">🖼️ গেস্ট: PiP মোড</button>
+      <button class="btn btn-a" onclick="playSting('breaking')">🎺 ব্রেকিং সাউন্ড</button>
+    </div>
+    <div id="dlArea" style="display:none;margin-top:6px"></div>
+  </div>
+
+  <div class="card">
+    <div class="ctitle"><span>📺 অন-স্ক্রিন গ্রাফিক্স ও ব্রেকিং নিউজ</span><span>LIVE OVERLAY</span></div>
+    <div class="row" style="margin-bottom:0">
+      <input type="text" id="chName" value="PATHIK TV" placeholder="চ্যানেলের নাম" style="flex:1">
+      <input type="text" id="locName" value="ঢাকা, বাংলাদেশ" placeholder="লোকেশন" style="flex:1">
+    </div>
+    <input type="text" id="headline" value="ব্রেকিং নিউজ: সরাসরি মাঠপর্যায় থেকে বিশেষ সংবাদ সম্প্রচার চলছে" placeholder="মূল শিরোনাম (Lower Third)">
+    <input type="text" id="ticker" value="সর্বশেষ সংবাদ: দেশ ও বিদেশের গুরুত্বপূর্ণ সব খবর জানতে আমাদের সাথেই থাকুন • সরাসরি সম্প্রচার নিয়ন্ত্রণ কক্ষ থেকে আপডেট..." placeholder="নিচের স্ক্রলিং টিকার লেখা">
+  </div>
+
+  <div class="card">
+    <div class="ctitle"><span>🛰️ রিমোট রিপোর্টার / গেস্ট লিংক (WebRTC)</span><span id="guestState" style="color:var(--mut)">OFFLINE</span></div>
+    <div class="linkbox" id="inviteLink">লিংক তৈরি হচ্ছে...</div>
+    <div class="row" style="margin-bottom:0">
+      <button class="btn" onclick="copyInvite()">📋 গেস্ট লিংক কপি করুন</button>
+      <button class="btn btn-r" onclick="dropGuest()">✖ গেস্ট সংযোগ বিচ্ছিন্ন</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="ctitle"><span>📜 টেলিপ্রম্পটার স্ক্রিপ্ট (Teleprompter)</span><button class="btn" style="flex:0;padding:3px 9px;font-size:.68rem" id="tpBtn" onclick="togglePrompter()">চালু করুন</button></div>
+    <textarea id="scriptInput" rows="3" placeholder="এখানে আপনার সংবাদ পাঠের স্ক্রিপ্ট লিখুন...">সুপ্রিয় দর্শক, আসসালামু আলাইকুম। পথিক টিভির বিশেষ সংবাদ বুলেটিনে আপনাদের স্বাগতম। এই মুহূর্তে আমরা সরাসরি যুক্ত হচ্ছি আমাদের মাঠপর্যায়ের প্রতিনিধির সাথে...</textarea>
+    <div class="srow">
+      <span>স্ক্রল গতি:</span>
+      <input type="range" id="tpSpeed" min="1" max="10" value="3">
+    </div>
+  </div>
+</div>
+
+<video id="hostVid" autoplay playsinline muted style="display:none"></video>
+<video id="remoteVid" autoplay playsinline style="display:none"></video>
+
+<script>
+const params=new URLSearchParams(location.search);
+const guestTarget=params.get('guest');
+let peer=null,hostStream=null,remoteStream=null,gStream=null,activeCall=null;
+let facing='user',gFacing='environment',isVertical=false,splitMode=false;
+let recorder=null,chunks=[],isRec=false,tickerX=720,tpOn=false,tpY=45,actx=null;
+
+const cvs=document.getElementById('pgm'),ctx=cvs.getContext('2d');
+const hVid=document.getElementById('hostVid'),rVid=document.getElementById('remoteVid');
+
+if(guestTarget){
+  document.getElementById('studioView').style.display='none';
+  document.getElementById('guestView').style.display='block';
+  document.getElementById('statusBadge').innerText='FIELD UPLINK';
+  initGuestPeer();
+}else{
+  initStudioPeer();
+  requestAnimationFrame(renderBroadcast);
+}
+
+// --- SOUND EFFECTS ---
+function playSting(type){
+  try{
+    if(!actx)actx=new(window.AudioContext||window.webkitAudioContext)();
+    if(actx.state==='suspended')actx.resume();
+    const now=actx.currentTime;
+    const notes=type==='breaking'?[523.25,659.25,783.99,1046.5]:[880,440];
+    notes.forEach((freq,i)=>{
+      const o=actx.createOscillator(),g=actx.createGain();
+      o.type='sawtooth';o.frequency.setValueAtTime(freq,now+i*0.09);
+      g.gain.setValueAtTime(0.22,now+i*0.09);
+      g.gain.exponentialRampToValueAtTime(0.001,now+i*0.09+0.35);
+      o.connect(g);g.connect(actx.destination);
+      o.start(now+i*0.09);o.stop(now+i*0.09+0.36);
+    });
+  }catch(e){}
+}
+
+// --- STUDIO WEBRTC ---
+function initStudioPeer(){
+  const roomId='NEWS-'+Math.random().toString(36).substring(2,7).toUpperCase();
+  peer=new Peer(roomId);
+  peer.on('open',id=>{
+    const url=location.origin+location.pathname+'?guest='+id;
+    document.getElementById('inviteLink').innerText=url;
+  });
+  peer.on('call',call=>{
+    activeCall=call;
+    call.answer(hostStream||undefined);
+    call.on('stream',stream=>{
+      remoteStream=stream;
+      rVid.srcObject=stream;rVid.play();
+      document.getElementById('guestState').innerText='🟢 GUEST LIVE';
+      document.getElementById('guestState').style.color='#00e676';
+      playSting('alert');
+    });
+    call.on('close',dropGuest);
+  });
+}
+
+function copyInvite(){
+  const txt=document.getElementById('inviteLink').innerText;
+  navigator.clipboard.writeText(txt);
+  alert('গেস্ট লিংক কপি হয়েছে! রিপোর্টার বা অতিথিকে হোয়াটসঅ্যাপে পাঠান।');
+}
+
+function dropGuest(){
+  if(activeCall)activeCall.close();
+  remoteStream=null;rVid.srcObject=null;
+  document.getElementById('guestState').innerText='OFFLINE';
+  document.getElementById('guestState').style.color='var(--mut)';
+}
+
+// --- GUEST WEBRTC ---
+function initGuestPeer(){
+  peer=new Peer();
+  peer.on('open',()=>{document.getElementById('gStatus').innerText='READY TO UPLINK';});
+}
+
+async function startGuestUplink(){
+  try{
+    if(gStream)gStream.getTracks().forEach(t=>t.stop());
+    gStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:gFacing},audio:true});
+    document.getElementById('gLocalVid').srcObject=gStream;
+    document.getElementById('gStatus').innerText='🔴 LIVE ON AIR';
+    document.getElementById('gStatus').style.color='var(--red)';
+    peer.call(guestTarget,gStream);
+  }catch(e){alert('ক্যামেরা ও মাইক্রোফোন পারমিশন Allow করুন।');}
+}
+
+async function flipGuestCam(){
+  gFacing=gFacing==='environment'?'user':'environment';
+  if(gStream)await startGuestUplink();
+}
+
+// --- STUDIO CAMERA ---
+async function toggleStudioCam(){
+  const btn=document.getElementById('camBtn');
+  if(hostStream){
+    hostStream.getTracks().forEach(t=>t.stop());hostStream=null;
+    btn.innerText='🎥 ক্যামেরা চালু';btn.classList.remove('on');
+    document.getElementById('statusBadge').innerText='STANDBY';
+    return;
+  }
+  try{
+    hostStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:1280},height:{ideal:720}},audio:true});
+    hVid.srcObject=hostStream;await hVid.play();
+    btn.innerText='⏹️ ক্যামেরা বন্ধ';btn.classList.add('on');
+    document.getElementById('statusBadge').innerText='● ON AIR';
+  }catch(e){alert('ক্যামেরা ও মাইক্রোফোন পারমিশন দিন।');}
+}
+
+async function flipStudioCam(){
+  facing=facing==='user'?'environment':'user';
+  if(hostStream){await toggleStudioCam();await toggleStudioCam();}
+}
+
+function toggleRatio(){
+  isVertical=!isVertical;
+  cvs.width=isVertical?450:720;
+  cvs.height=isVertical?800:405;
+  tickerX=cvs.width;
+  document.getElementById('ratioBtn').innerText=isVertical?'📱 9:16 রিলস মোড':'📐 16:9 টিভি মোড';
+}
+
+function toggleLayout(){
+  splitMode=!splitMode;
+  document.getElementById('layoutBtn').innerText=splitMode?'🪟 গেস্ট: Split মোড':'🖼️ গেস্ট: PiP মোড';
+}
+
+function togglePrompter(){
+  tpOn=!tpOn;
+  const box=document.getElementById('prompterBox');
+  box.style.display=tpOn?'block':'none';
+  document.getElementById('tpBtn').innerText=tpOn?'বন্ধ করুন':'চালু করুন';
+  tpY=55;
+}
+
+// --- LIVE COMPOSITOR RENDER LOOP ---
+function drawVideoFit(video,x,y,w,h){
+  if(!video||video.readyState<2){
+    ctx.fillStyle='#0a101d';ctx.fillRect(x,y,w,h);
+    ctx.fillStyle='#3b4d6b';ctx.font='bold 16px sans-serif';ctx.textAlign='center';
+    ctx.fillText('NO SIGNAL // CAMERA STANDBY',x+w/2,y+h/2);ctx.textAlign='left';
+    return;
+  }
+  const vw=video.videoWidth,vh=video.videoHeight;
+  const scale=Math.max(w/vw,h/vh);
+  const nw=vw*scale,nh=vh*scale;
+  ctx.save();ctx.beginPath();ctx.rect(x,y,w,h);ctx.clip();
+  ctx.drawImage(video,x+(w-nw)/2,y+(h-nh)/2,nw,nh);
+  ctx.restore();
+}
+
+function renderBroadcast(){
+  const W=cvs.width,H=cvs.height;
+  ctx.fillStyle='#04070d';ctx.fillRect(0,0,W,H);
+
+  // 1. Video Layers
+  if(remoteStream&&splitMode){
+    if(isVertical){
+      drawVideoFit(hVid,0,0,W,H/2);
+      drawVideoFit(rVid,0,H/2,W,H/2);
+      ctx.fillStyle='#00e5ff';ctx.fillRect(0,H/2-2,W,4);
+    }else{
+      drawVideoFit(hVid,0,0,W/2,H);
+      drawVideoFit(rVid,W/2,0,W/2,H);
+      ctx.fillStyle='#00e5ff';ctx.fillRect(W/2-2,0,4,H);
+    }
+  }else{
+    drawVideoFit(hVid,0,0,W,H);
+    if(remoteStream){
+      const pw=isVertical?150:210,ph=isVertical?210:125;
+      const px=W-pw-14,py=65;
+      ctx.fillStyle='#00e5ff';ctx.fillRect(px-3,py-3,pw+6,ph+6);
+      drawVideoFit(rVid,px,py,pw,ph);
+      ctx.fillStyle='rgba(0,0,0,0.75)';ctx.fillRect(px,py+ph-20,pw,20);
+      ctx.fillStyle='#00e5ff';ctx.font='bold 11px sans-serif';
+      ctx.fillText('📡 LIVE REPORTER',px+6,py+ph-6);
+    }
+  }
+
+  // 2. Top-Left LIVE Badge & Clock
+  ctx.fillStyle='#ff1e42';ctx.fillRect(14,14,62,26);
+  ctx.fillStyle='#fff';ctx.font='bold 14px sans-serif';ctx.fillText('● LIVE',21,32);
+
+  const timeStr=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  ctx.fillStyle='rgba(6,10,18,0.82)';ctx.fillRect(76,14,88,26);
+  ctx.fillStyle='#00e5ff';ctx.font='bold 13px monospace';ctx.fillText(timeStr,83,31);
+
+  // 3. Top-Right Channel Bug & Location
+  const ch=(document.getElementById('chName').value||'PATHIK TV').toUpperCase();
+  const loc=document.getElementById('locName').value||'';
+  ctx.fillStyle='rgba(6,10,18,0.88)';ctx.fillRect(W-154,14,140,28);
+  ctx.fillStyle='#ffb300';ctx.fillRect(W-154,14,5,28);
+  ctx.fillStyle='#fff';ctx.font='bold 14px sans-serif';ctx.fillText(ch,W-142,33);
+  if(loc){
+    ctx.fillStyle='rgba(255,30,66,0.9)';ctx.fillRect(W-154,42,140,18);
+    ctx.fillStyle='#fff';ctx.font='bold 10px sans-serif';ctx.fillText('📍 '+loc,W-148,54);
+  }
+
+  // 4. Lower-Third Headline Banner
+  const hl=document.getElementById('headline').value||'';
+  const barH=32,hlH=44;
+  const hlY=H-barH-hlH;
+  ctx.fillStyle='rgba(10,16,28,0.92)';ctx.fillRect(0,hlY,W,hlH);
+  ctx.fillStyle='#ff1e42';ctx.fillRect(0,hlY,8,hlH);
+  ctx.fillStyle='#fff';ctx.font='bold 17px sans-serif';
+  ctx.fillText(hl,18,hlY+28);
+
+  // 5. Bottom Scrolling Ticker
+  const tk=document.getElementById('ticker').value||'';
+  ctx.fillStyle='#b71c1c';ctx.fillRect(0,H-barH,W,barH);
+  ctx.fillStyle='#ffb300';ctx.fillRect(0,H-barH,105,barH);
+  ctx.fillStyle='#000';ctx.font='bold 13px sans-serif';ctx.fillText('BREAKING',14,H-11);
+
+  ctx.save();ctx.beginPath();ctx.rect(108,H-barH,W-108,barH);ctx.clip();
+  ctx.fillStyle='#fff';ctx.font='bold 14px sans-serif';
+  const tw=ctx.measureText(tk).width;
+  ctx.fillText(tk,tickerX,H-10);
+  tickerX-=2.2;
+  if(tickerX<108-tw)tickerX=W;
+  ctx.restore();
+
+  // 6. Teleprompter Scroll
+  if(tpOn){
+    const txtEl=document.getElementById('prompterTxt');
+    txtEl.innerText=document.getElementById('scriptInput').value;
+    const spd=parseInt(document.getElementById('tpSpeed').value)*0.22;
+    tpY-=spd;
+    if(tpY<-txtEl.offsetHeight)tpY=65;
+    txtEl.style.transform=`translateY(${tpY}px)`;
+  }
+
+  requestAnimationFrame(renderBroadcast);
+}
+
+// --- RECORD FINAL BROADCAST ---
+function toggleRecord(){
+  const btn=document.getElementById('recBtn');
+  if(isRec){
+    recorder.stop();isRec=false;
+    btn.innerText='🔴 REC ব্রডকাস্ট';btn.classList.remove('on');
+    return;
+  }
+  const cStream=cvs.captureStream(30);
+  if(hostStream){
+    hostStream.getAudioTracks().forEach(t=>cStream.addTrack(t));
+  }
+  chunks=[];
+  recorder=new MediaRecorder(cStream,{mimeType:'video/webm'});
+  recorder.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};
+  recorder.onstop=()=>{
+    const blob=new Blob(chunks,{type:'video/webm'});
+    const url=URL.createObjectURL(blob);
+    const dl=document.getElementById('dlArea');
+    dl.style.display='block';
+    dl.innerHTML=`<a href="${url}" download="NEWS_BROADCAST_${Date.now()}.webm" style="display:block;text-align:center;padding:9px;background:#00e676;color:#000;font-weight:bold;border-radius:6px;text-decoration:none;font-size:.8rem">⬇ রেকর্ড করা নিউজ ভিডিও ডাউনলোড করুন</a>`;
+  };
+  recorder.start();isRec=true;
+  btn.innerText='⏹️ রেকর্ডিং সেভ করুন';btn.classList.add('on');
+}
+</script>
+</body>
+</html>
