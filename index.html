@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>NEWS-COMMAND v3.0 // Virtual Studio</title>
+<title>NEWS-COMMAND v3.1 // Multi-Guest Studio</title>
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
 <style>
@@ -37,12 +37,13 @@ input[type=text],textarea{width:100%;background:#04070d;border:1px solid var(--b
 .linkbox{background:#04070c;border:1px dashed var(--cyan);padding:8px;border-radius:6px;font-size:.7rem;word-break:break-all;color:var(--cyan);margin-bottom:7px;font-family:monospace}
 .guest-view{display:none;text-align:center;padding:20px 12px}
 input[type=file]{display:none}
+#remotePool video{display:none}
 </style>
 </head>
 <body>
 
 <header>
-  <div><div class="brand">📡 NEWS-COMMAND v3.0</div><div class="sub">VIRTUAL STUDIO & DESK PROPS HUD</div></div>
+  <div><div class="brand">📡 NEWS-COMMAND v3.1</div><div class="sub">MULTI-GUEST VIRTUAL STUDIO HUD</div></div>
   <div class="badge" id="statusBadge">STANDBY</div>
 </header>
 
@@ -140,14 +141,14 @@ input[type=file]{display:none}
     <input type="text" id="ticker" value="সর্বশেষ সংবাদ: পথিক টিভির স্টুডিও থেকে সরাসরি সংবাদ বুলেটিন • দেশ ও বিদেশের গুরুত্বপূর্ণ সব খবর জানতে সাথেই থাকুন..." placeholder="নিচের স্ক্রলিং টিকার">
   </div>
 
-  <!-- REMOTE GUEST WEBRTC -->
+  <!-- MULTI-GUEST WEBRTC -->
   <div class="card">
-    <div class="ctitle"><span>🛰️ রিমোট রিপোর্টার / গেস্ট লিংক</span><span id="guestState" style="color:var(--mut)">OFFLINE</span></div>
+    <div class="ctitle"><span>🛰️ রিমোট রিপোর্টার / গেস্ট লিংক (Max 4)</span><span id="guestState" style="color:var(--mut)">GUESTS: 0/4</span></div>
     <div class="linkbox" id="inviteLink">লিংক তৈরি হচ্ছে...</div>
     <div class="row" style="margin-bottom:0">
       <button class="btn" onclick="copyInvite()">📋 গেস্ট লিংক কপি</button>
       <button class="btn btn-a" id="layoutBtn" onclick="toggleLayout()">🖼️ গেস্ট: PiP</button>
-      <button class="btn btn-r" onclick="dropGuest()">✖ সংযোগ বিচ্ছিন্ন</button>
+      <button class="btn btn-r" onclick="dropAllGuests()">✖ সবাইকে ডিসকানেক্ট</button>
     </div>
   </div>
 
@@ -162,14 +163,17 @@ input[type=file]{display:none}
   </div>
 </div>
 
+<div id="remotePool"></div>
 <video id="hostVid" autoplay playsinline muted style="display:none"></video>
-<video id="remoteVid" autoplay playsinline style="display:none"></video>
 <audio id="bgmAudio" loop></audio>
 
 <script>
 const params=new URLSearchParams(location.search);
 const guestTarget=params.get('guest');
-let peer=null,hostStream=null,remoteStream=null,gStream=null,activeCall=null;
+const MAX_GUESTS=4;
+
+let peer=null,hostStream=null,gStream=null;
+let guests=[]; // { peerId, call, vidEl, stream }
 let facing='user',gFacing='environment',isVertical=false,splitMode=false,mirrorHost=false;
 let showName=true,showBRoll=false,brollImg=null,logoImg=null;
 let virtualBGOn=false,deskPropsOn=true,customStudioImg=null;
@@ -178,9 +182,8 @@ let recorder=null,chunks=[],isRec=false,tickerX=720,tpOn=false,tpY=45,steamPhase
 let actx=null,mixDest=null,bgmGain=null,bedGain=null,bedOn=false,bedTimer=null,mp3Playing=false,micAnalyser=null,micData=null,elConnected=false;
 
 const cvs=document.getElementById('pgm'),ctx=cvs.getContext('2d');
-const hVid=document.getElementById('hostVid'),rVid=document.getElementById('remoteVid'),bgmEl=document.getElementById('bgmAudio');
+const hVid=document.getElementById('hostVid'),bgmEl=document.getElementById('bgmAudio'),remotePool=document.getElementById('remotePool');
 
-// Offscreen Canvases for Virtual Studio Segmentation
 const segCvs=document.createElement('canvas');segCvs.width=640;segCvs.height=360;
 const segCtx=segCvs.getContext('2d');
 let segBusy=false,selfieSeg=null;
@@ -209,7 +212,57 @@ if(guestTarget){
   requestAnimationFrame(renderBroadcast);
 }
 
-// --- VIRTUAL STUDIO & DESK PROPS RENDERER ---
+function updateGuestCounter(){
+  const el=document.getElementById('guestState');
+  if(guests.length>0){
+    el.innerText=`🟢 GUESTS: ${guests.length}/${MAX_GUESTS}`;
+    el.style.color='#00e676';
+  }else{
+    el.innerText=`GUESTS: 0/${MAX_GUESTS}`;
+    el.style.color='var(--mut)';
+  }
+}
+
+function removeGuestByPeer(peerId){
+  const idx=guests.findIndex(g=>g.peerId===peerId);
+  if(idx!==-1){
+    const g=guests[idx];
+    try{if(g.call)g.call.close();}catch(e){}
+    try{if(g.vidEl&&g.vidEl.parentNode)g.vidEl.parentNode.removeChild(g.vidEl);}catch(e){}
+    guests.splice(idx,1);
+    updateGuestCounter();
+  }
+}
+
+function attachGuestStream(call,stream){
+  const peerId=call.peer;
+  removeGuestByPeer(peerId);
+  if(guests.length>=MAX_GUESTS){
+    try{call.close();}catch(e){}
+    return;
+  }
+
+  const vidEl=document.createElement('video');
+  vidEl.autoplay=true;
+  vidEl.playsinline=true;
+  vidEl.muted=true;
+  vidEl.srcObject=stream;
+  vidEl.onloadedmetadata=()=>vidEl.play().catch(()=>{});
+  vidEl.play().catch(()=>{});
+  remotePool.appendChild(vidEl);
+
+  ensureAudio();
+  try{
+    const rSrc=actx.createMediaStreamSource(stream);
+    rSrc.connect(mixDest);
+    rSrc.connect(actx.destination);
+  }catch(e){}
+
+  guests.push({peerId,call,vidEl,stream});
+  updateGuestCounter();
+  playBreakingSting();
+}
+
 function toggleVirtualBG(){
   virtualBGOn=!virtualBGOn;
   const b=document.getElementById('vBgBtn');
@@ -243,14 +296,12 @@ function drawVirtualStudioBG(W,H,chName){
     drawCover(customStudioImg,0,0,W,H,false);
     return;
   }
-  // 1. Deep Broadcast Newsroom Gradient Wall
   const grad=ctx.createLinearGradient(0,0,0,H);
   grad.addColorStop(0,'#040b1a');
   grad.addColorStop(0.5,'#0a1f44');
   grad.addColorStop(1,'#030812');
   ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
 
-  // 2. Architectural Studio Panels & Neon Light Columns
   ctx.fillStyle='rgba(0,229,255,0.08)';
   ctx.fillRect(W*0.06,0,W*0.14,H);
   ctx.fillRect(W*0.80,0,W*0.14,H);
@@ -261,16 +312,13 @@ function drawVirtualStudioBG(W,H,chName){
   ctx.fillRect(W*0.06,0,3,H);
   ctx.fillRect(W*0.94,0,3,H);
 
-  // 3. Perspective Newsroom Grid & Glowing World Map Silhouette
   ctx.strokeStyle='rgba(0,229,255,0.14)';ctx.lineWidth=1;
   for(let x=0;x<W;x+=36){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
   for(let y=0;y<H;y+=36){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
 
-  // Glowing Studio Wall Display (Left & Right)
   ctx.save();
   ctx.fillStyle='rgba(6,16,36,0.88)';
   ctx.strokeStyle='#00e5ff';ctx.lineWidth=2;
-  // Left LED Screen
   ctx.fillRect(W*0.03,H*0.22,W*0.24,H*0.32);
   ctx.strokeRect(W*0.03,H*0.22,W*0.24,H*0.32);
   ctx.fillStyle='#ff1e42';ctx.fillRect(W*0.03,H*0.22,W*0.24,18);
@@ -278,7 +326,6 @@ function drawVirtualStudioBG(W,H,chName){
   ctx.fillStyle='#00e5ff';ctx.font='bold 16px sans-serif';ctx.fillText(chName,W*0.045,H*0.37);
   ctx.fillStyle='#ffb300';ctx.font='bold 10px monospace';ctx.fillText('24/7 NEWS DESK',W*0.045,H*0.44);
 
-  // Right LED Screen
   ctx.fillStyle='rgba(6,16,36,0.88)';
   ctx.fillRect(W*0.73,H*0.22,W*0.24,H*0.32);
   ctx.strokeRect(W*0.73,H*0.22,W*0.24,H*0.32);
@@ -295,7 +342,6 @@ function drawDeskAndProps(W,H,chName){
   const deskH=52;
 
   ctx.save();
-  // 1. Sleek Glass & Metallic News Anchor Desk
   const dGrad=ctx.createLinearGradient(0,deskTop,0,deskTop+deskH);
   dGrad.addColorStop(0,'#1b2a47');
   dGrad.addColorStop(0.2,'#0d172a');
@@ -309,48 +355,36 @@ function drawDeskAndProps(W,H,chName){
   ctx.closePath();
   ctx.fill();
 
-  // Glowing Cyan Desk Rim
   ctx.strokeStyle='#00e5ff';ctx.lineWidth=2.5;
   ctx.beginPath();ctx.moveTo(0,deskTop+10);ctx.quadraticCurveTo(W/2,deskTop-8,W,deskTop+10);ctx.stroke();
 
-  // 2. PATHIK TV Laptop / Tablet (Left-Center on Desk)
   const lx=W*0.13,ly=deskTop-26;
-  // Laptop Screen Back
   ctx.fillStyle='#101828';ctx.strokeStyle='#475569';ctx.lineWidth=2;
   ctx.beginPath();ctx.roundRect(lx,ly,98,56,5);ctx.fill();ctx.stroke();
-  // Glowing Inner Panel
   ctx.fillStyle='#0284c7';
   ctx.beginPath();ctx.roundRect(lx+5,ly+5,88,44,3);ctx.fill();
-  // Laptop Branding
   ctx.fillStyle='#fff';ctx.font='bold 10px sans-serif';ctx.textAlign='center';
   ctx.fillText(chName,lx+49,ly+25);
   ctx.fillStyle='#ffb300';ctx.font='bold 7px monospace';
   ctx.fillText('NEWS TERMINAL',lx+49,ly+37);
   ctx.textAlign='left';
-  // Laptop Base
   ctx.fillStyle='#94a3b8';
   ctx.fillRect(lx-8,ly+55,114,5);
 
-  // 3. Broadcast Studio Microphone (Right-Center on Desk)
   const mx=W*0.76,my=deskTop-44;
-  // Mic Stand
   ctx.strokeStyle='#cbd5e1';ctx.lineWidth=4;
   ctx.beginPath();ctx.moveTo(mx,my+32);ctx.lineTo(mx+8,deskTop+16);ctx.stroke();
   ctx.fillStyle='#334155';ctx.beginPath();ctx.ellipse(mx+8,deskTop+17,16,5,0,0,Math.PI*2);ctx.fill();
-  // Mic Flag Box (PATHIK TV)
   ctx.fillStyle='#ff1e42';ctx.fillRect(mx-14,my+14,28,16);
   ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.strokeRect(mx-14,my+14,28,16);
   ctx.fillStyle='#fff';ctx.font='bold 6.5px sans-serif';ctx.textAlign='center';
   ctx.fillText(chName.slice(0,9),mx,my+24);ctx.textAlign='left';
-  // Mic Capsule & Red ON-AIR Ring
   ctx.fillStyle='#1e293b';
   ctx.beginPath();ctx.roundRect(mx-9,my-8,18,24,8);ctx.fill();
   ctx.strokeStyle='#ff1e42';ctx.lineWidth=2;
   ctx.beginPath();ctx.moveTo(mx-9,my+8);ctx.lineTo(mx+9,my+8);ctx.stroke();
 
-  // 4. PATHIK TV Coffee Mug (Far Right on Desk)
   const cx=W*0.87,cy=deskTop-8;
-  // Steam Animation
   steamPhase+=0.05;
   ctx.strokeStyle='rgba(255,255,255,0.35)';ctx.lineWidth=1.5;
   for(let s=0;s<2;s++){
@@ -360,13 +394,10 @@ function drawDeskAndProps(W,H,chName){
     ctx.quadraticCurveTo(sx+Math.sin(steamPhase+s)*5,cy-12,sx-Math.cos(steamPhase+s)*4,cy-20);
     ctx.stroke();
   }
-  // Mug Handle
   ctx.strokeStyle='#e2e8f0';ctx.lineWidth=3.5;
   ctx.beginPath();ctx.arc(cx+28,cy+13,7,-Math.PI/2,Math.PI/2);ctx.stroke();
-  // Mug Body
   ctx.fillStyle='#f8fafc';
   ctx.beginPath();ctx.roundRect(cx,cy,28,26,[2,2,6,6]);ctx.fill();
-  // Mug Logo Strip
   ctx.fillStyle='#ff1e42';ctx.fillRect(cx,cy+8,28,9);
   ctx.fillStyle='#fff';ctx.font='bold 5.5px sans-serif';ctx.textAlign='center';
   ctx.fillText(chName.slice(0,8),cx+14,cy+14.5);ctx.textAlign='left';
@@ -374,7 +405,6 @@ function drawDeskAndProps(W,H,chName){
   ctx.restore();
 }
 
-// --- AUDIO ENGINE ---
 function ensureAudio(){
   if(!actx){
     actx=new(window.AudioContext||window.webkitAudioContext)();
@@ -446,7 +476,7 @@ function loadCustomBGM(inp){
     mp3Playing=true;
     const b=document.getElementById('mp3PlayBtn');
     b.style.display='block';b.innerText='⏸ MP3 পজ';b.classList.add('on');
-  }).catch(err=>alert('অডিও চালু করতে ▶ MP3 প্লে বাটনে চাপ দিন।'));
+  }).catch(()=>alert('অডিও চালু করতে ▶ MP3 প্লে বাটনে চাপ দিন।'));
 }
 
 function toggleCustomBGM(){
@@ -495,28 +525,28 @@ function loadLogo(inp){
   img.src=URL.createObjectURL(inp.files[0]);
 }
 
-// --- WEBRTC ---
 function initStudioPeer(){
   const roomId='NEWS-'+Math.random().toString(36).substring(2,7).toUpperCase();
   peer=new Peer(roomId);
   peer.on('open',id=>{
     document.getElementById('inviteLink').innerText=location.origin+location.pathname+'?guest='+id;
   });
+  peer.on('error',err=>console.warn('Studio Peer error:',err));
   peer.on('call',call=>{
-    activeCall=call;
     call.answer(hostStream||undefined);
-    call.on('stream',stream=>{
-      remoteStream=stream;rVid.srcObject=stream;rVid.play();
-      ensureAudio();
-      try{
-        const rSrc=actx.createMediaStreamSource(stream);
-        rSrc.connect(mixDest);
-      }catch(e){}
-      document.getElementById('guestState').innerText='🟢 GUEST LIVE';
-      document.getElementById('guestState').style.color='#00e676';
-      playBreakingSting();
+    call.on('stream',stream=>attachGuestStream(call,stream));
+    call.on('close',()=>removeGuestByPeer(call.peer));
+    call.on('error',()=>removeGuestByPeer(call.peer));
+  });
+  peer.on('connection',conn=>{
+    conn.on('data',data=>{
+      if(data&&data.type==='guest-ready'){
+        const existing=guests.find(g=>g.peerId===conn.peer);
+        if(existing&&existing.call&&existing.call.remoteStream){
+          attachGuestStream(existing.call,existing.call.remoteStream);
+        }
+      }
     });
-    call.on('close',dropGuest);
   });
 }
 
@@ -526,26 +556,27 @@ function copyInvite(){
   else prompt('লিংকটি কপি করুন:',txt);
 }
 
-function dropGuest(){
-  if(activeCall)activeCall.close();
-  remoteStream=null;rVid.srcObject=null;
-  document.getElementById('guestState').innerText='OFFLINE';
-  document.getElementById('guestState').style.color='var(--mut)';
+function dropAllGuests(){
+  [...guests].forEach(g=>removeGuestByPeer(g.peerId));
 }
 
 function initGuestPeer(){
   peer=new Peer();
   peer.on('open',()=>{document.getElementById('gStatus').innerText='READY TO UPLINK';});
+  peer.on('error',()=>{document.getElementById('gStatus').innerText='RETRYING...';});
 }
 
 async function startGuestUplink(){
   try{
+    ensureAudio();
     if(gStream)gStream.getTracks().forEach(t=>t.stop());
     gStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:gFacing},audio:true});
     document.getElementById('gLocalVid').srcObject=gStream;
     document.getElementById('gStatus').innerText='🔴 LIVE ON AIR';
     document.getElementById('gStatus').style.color='var(--red)';
-    peer.call(guestTarget,gStream);
+    const call=peer.call(guestTarget,gStream);
+    const conn=peer.connect(guestTarget);
+    conn.on('open',()=>conn.send({type:'guest-ready'}));
   }catch(e){alert('ক্যামেরা ও মাইক্রোফোন পারমিশন Allow করুন।');}
 }
 
@@ -558,7 +589,6 @@ async function flipGuestCam(){
   }
 }
 
-// --- CAMERA ---
 async function startCameraStream(){
   ensureAudio();
   try{
@@ -569,7 +599,9 @@ async function startCameraStream(){
     const tgt=facing==='environment'?cams[cams.length-1]:cams[0];
     hostStream=await navigator.mediaDevices.getUserMedia({video:tgt?{deviceId:{exact:tgt.deviceId}}:true,audio:true});
   }
-  hVid.srcObject=hostStream;await hVid.play();
+  hVid.srcObject=hostStream;
+  hVid.onloadedmetadata=()=>hVid.play().catch(()=>{});
+  await hVid.play().catch(()=>{});
   const micSrc=actx.createMediaStreamSource(hostStream);
   micSrc.connect(mixDest);
   micAnalyser=actx.createAnalyser();micAnalyser.fftSize=256;
@@ -632,9 +664,10 @@ function togglePrompter(){
   tpY=55;
 }
 
-// --- MAIN COMPOSITOR ---
 function drawCover(src,x,y,w,h,mirror=false,skipPlaceholder=false){
-  const sw=src.videoWidth||src.width,sh=src.videoHeight||src.height;
+  if(!src)return;
+  const sw=src.videoWidth||src.naturalWidth||src.width||0;
+  const sh=src.videoHeight||src.naturalHeight||src.height||0;
   if(!sw||!sh){
     if(skipPlaceholder)return;
     ctx.fillStyle='#0a101d';ctx.fillRect(x,y,w,h);
@@ -649,12 +682,46 @@ function drawCover(src,x,y,w,h,mirror=false,skipPlaceholder=false){
   ctx.restore();
 }
 
+function drawMultiGuests(W,H){
+  if(guests.length===0)return;
+  if(splitMode){
+    const cols=guests.length===1?1:2;
+    const rows=Math.ceil(guests.length/cols);
+    const areaX=isVertical?0:W*0.5;
+    const areaY=isVertical?H*0.5:0;
+    const areaW=isVertical?W:W*0.5;
+    const areaH=isVertical?H*0.5:H;
+    const cellW=areaW/cols;
+    const cellH=areaH/rows;
+
+    guests.forEach((g,i)=>{
+      const c=i%cols,r=Math.floor(i/cols);
+      const gx=areaX+c*cellW,gy=areaY+r*cellH;
+      drawCover(g.vidEl,gx,gy,cellW,cellH,false);
+      ctx.strokeStyle='#00e5ff';ctx.lineWidth=1.5;ctx.strokeRect(gx,gy,cellW,cellH);
+      ctx.fillStyle='rgba(0,0,0,0.75)';ctx.fillRect(gx+4,gy+cellH-20,Math.min(110,cellW-8),16);
+      ctx.fillStyle='#00e5ff';ctx.font='bold 9px sans-serif';ctx.fillText(`📡 GUEST ${i+1}`,gx+8,gy+cellH-9);
+    });
+  }else{
+    const pw=isVertical?115:155;
+    const ph=isVertical?82:90;
+    guests.forEach((g,i)=>{
+      const px=W-pw-12;
+      const py=66+i*(ph+8);
+      if(py+ph>H-80)return;
+      ctx.fillStyle='#00e5ff';ctx.fillRect(px-2,py-2,pw+4,ph+4);
+      drawCover(g.vidEl,px,py,pw,ph,false);
+      ctx.fillStyle='rgba(0,0,0,0.78)';ctx.fillRect(px,py+ph-17,pw,17);
+      ctx.fillStyle='#00e5ff';ctx.font='bold 9px sans-serif';ctx.fillText(`📡 GUEST ${i+1}`,px+5,py+ph-5);
+    });
+  }
+}
+
 function renderBroadcast(){
   const W=cvs.width,H=cvs.height;
   const ch=(document.getElementById('chName').value||'PATHIK TV').toUpperCase();
   ctx.fillStyle='#04070d';ctx.fillRect(0,0,W,H);
 
-  // Auto-Ducking
   if(micAnalyser&&actx){
     micAnalyser.getByteFrequencyData(micData);
     let sum=0;for(let i=0;i<micData.length;i++)sum+=micData[i];
@@ -665,25 +732,22 @@ function renderBroadcast(){
     if(bedGain)bedGain.gain.setTargetAtTime(targetVol*0.75,actx.currentTime,0.12);
   }
 
-  // Trigger AI Segmentation if Virtual BG is active
   if(virtualBGOn&&selfieSeg&&!segBusy&&hVid.readyState>=2){
     segBusy=true;
     selfieSeg.send({image:hVid}).catch(()=>{segBusy=false;});
   }
 
-  // 1. Background & Host Video Layer
-  if(remoteStream&&splitMode){
+  if(guests.length>0&&splitMode){
     if(isVertical){
       if(virtualBGOn){drawVirtualStudioBG(W,H/2,ch);drawCover(segCvs,0,0,W,H/2,mirrorHost,true);}
       else{drawCover(hVid,0,0,W,H/2,mirrorHost);}
-      drawCover(rVid,0,H/2,W,H/2,false);
       ctx.fillStyle='#00e5ff';ctx.fillRect(0,H/2-2,W,4);
     }else{
       if(virtualBGOn){drawVirtualStudioBG(W/2,H,ch);drawCover(segCvs,0,0,W/2,H,mirrorHost,true);}
       else{drawCover(hVid,0,0,W/2,H,mirrorHost);}
-      drawCover(rVid,W/2,0,W/2,H,false);
       ctx.fillStyle='#00e5ff';ctx.fillRect(W/2-2,0,4,H);
     }
+    drawMultiGuests(W,H);
   }else{
     if(virtualBGOn){
       drawVirtualStudioBG(W,H,ch);
@@ -692,12 +756,10 @@ function renderBroadcast(){
       drawCover(hVid,0,0,W,H,mirrorHost);
     }
 
-    // Foreground News Desk + Laptop + Mic + Coffee Mug
     if(deskPropsOn){
       drawDeskAndProps(W,H,ch);
     }
 
-    // B-Roll Media Overlay
     if(showBRoll&&brollImg){
       const bw=isVertical?W-40:W*0.54,bh=isVertical?H*0.34:H*0.50;
       const bx=(W-bw)/2,by=isVertical?90:54;
@@ -707,18 +769,9 @@ function renderBroadcast(){
       ctx.fillStyle='#ffb300';ctx.font='bold 10px sans-serif';ctx.fillText('📷 FILE FOOTAGE',bx+6,by+14);
     }
 
-    // Remote Guest PiP
-    if(remoteStream){
-      const pw=isVertical?145:205,ph=isVertical?200:120;
-      const px=W-pw-14,py=70;
-      ctx.fillStyle='#00e5ff';ctx.fillRect(px-3,py-3,pw+6,ph+6);
-      drawCover(rVid,px,py,pw,ph,false);
-      ctx.fillStyle='rgba(0,0,0,0.78)';ctx.fillRect(px,py+ph-20,pw,20);
-      ctx.fillStyle='#00e5ff';ctx.font='bold 11px sans-serif';ctx.fillText('📡 LIVE REPORTER',px+6,py+ph-6);
-    }
+    drawMultiGuests(W,H);
   }
 
-  // 2. Top-Left LIVE Badge & Clock
   ctx.fillStyle='#ff1e42';ctx.fillRect(14,14,62,26);
   ctx.fillStyle='#fff';ctx.font='bold 14px sans-serif';ctx.fillText('● LIVE',21,32);
 
@@ -726,7 +779,6 @@ function renderBroadcast(){
   ctx.fillStyle='rgba(6,10,18,0.85)';ctx.fillRect(76,14,88,26);
   ctx.fillStyle='#00e5ff';ctx.font='bold 13px monospace';ctx.fillText(timeStr,83,31);
 
-  // 3. Top-Right Logo / Channel Name & Location
   const loc=document.getElementById('locName').value||'';
   if(logoImg){
     ctx.drawImage(logoImg,W-95,12,80,45);
@@ -741,7 +793,6 @@ function renderBroadcast(){
     ctx.fillStyle='#fff';ctx.font='bold 10px sans-serif';ctx.fillText('📍 '+loc,W-148,ly+12);
   }
 
-  // 4. Lower-Thirds
   const barH=32,hlH=42,hlY=H-barH-hlH;
   if(showName){
     const an=document.getElementById('anchorName').value||'';
@@ -783,7 +834,6 @@ function renderBroadcast(){
   requestAnimationFrame(renderBroadcast);
 }
 
-// --- SNAPSHOT & VIDEO RECORD ---
 function takeSnapshot(){
   const url=cvs.toDataURL('image/png');
   const dl=document.getElementById('dlArea');
