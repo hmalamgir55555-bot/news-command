@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>NEWS-COMMAND v3.1 // Multi-Guest Studio</title>
+<title>NEWS-COMMAND v3.2 // Studio & Guest Fix</title>
 <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
 <style>
@@ -43,7 +43,7 @@ input[type=file]{display:none}
 <body>
 
 <header>
-  <div><div class="brand">📡 NEWS-COMMAND v3.1</div><div class="sub">MULTI-GUEST VIRTUAL STUDIO HUD</div></div>
+  <div><div class="brand">📡 NEWS-COMMAND v3.2</div><div class="sub">DUAL-GUEST VIRTUAL STUDIO HUD</div></div>
   <div class="badge" id="statusBadge">STANDBY</div>
 </header>
 
@@ -57,7 +57,7 @@ input[type=file]{display:none}
       <button class="btn on" onclick="startGuestUplink()">📡 স্টুডিওতে লাইভ যুক্ত হন</button>
       <button class="btn btn-a" onclick="flipGuestCam()">🔄 ক্যামেরা</button>
     </div>
-    <div style="font-size:.72rem;color:var(--mut)">টু-ওয়ে অডিও চালু আছে—আপনার কথা স্টুডিও ও অন্য গেস্টরা শুনতে পাবেন, আর আপনিও স্টুডিওর অডিও শুনতে পারবেন।</div>
+    <div style="font-size:.72rem;color:var(--mut)">আপনার ভিডিও ও অডিও সরাসরি স্টুডিওতে যাচ্ছে এবং স্টুডিওর অডিও আপনি শুনতে পাবেন।</div>
   </div>
 </div>
 
@@ -142,14 +142,21 @@ input[type=file]{display:none}
     <input type="text" id="ticker" value="সর্বশেষ সংবাদ: পথিক টিভির স্টুডিও থেকে সরাসরি সংবাদ বুলেটিন • দেশ ও বিদেশের গুরুত্বপূর্ণ সব খবর জানতে সাথেই থাকুন..." placeholder="নিচের স্ক্রলিং টিকার">
   </div>
 
-  <!-- MULTI-GUEST WEBRTC -->
+  <!-- DUAL-GUEST WEBRTC -->
   <div class="card">
-    <div class="ctitle"><span>🛰️ রিমোট রিপোর্টার / গেস্ট লিংক (Max 4)</span><span id="guestState" style="color:var(--mut)">GUESTS: 0/4</span></div>
+    <div class="ctitle">
+      <span>🛰️ রিমোট গেস্ট লিংক</span>
+      <span id="guestState" style="color:var(--mut)">GUESTS: 0/2</span>
+    </div>
+    <div class="row">
+      <button class="btn on" id="cap1Btn" onclick="setMaxGuests(1)">👤 ১ জন গেস্ট</button>
+      <button class="btn" id="cap2Btn" onclick="setMaxGuests(2)">👥 ২ জন গেস্ট</button>
+    </div>
     <div class="linkbox" id="inviteLink">লিংক তৈরি হচ্ছে...</div>
     <div class="row" style="margin-bottom:0">
       <button class="btn" onclick="copyInvite()">📋 গেস্ট লিংক কপি</button>
-      <button class="btn btn-a" id="layoutBtn" onclick="toggleLayout()">🖼️ গেস্ট: PiP</button>
-      <button class="btn btn-r" onclick="dropAllGuests()">✖ সবাইকে ডিসকানেক্ট</button>
+      <button class="btn btn-a" id="layoutBtn" onclick="toggleLayout()">🪟 গেস্ট: Split</button>
+      <button class="btn btn-r" onclick="dropAllGuests()">✖ ডিসকানেক্ট</button>
     </div>
   </div>
 
@@ -171,11 +178,11 @@ input[type=file]{display:none}
 <script>
 const params=new URLSearchParams(location.search);
 const guestTarget=params.get('guest');
-const MAX_GUESTS=4;
+let maxGuests=2;
 
 let peer=null,hostStream=null,gStream=null;
 let guests=[];
-let facing='user',gFacing='environment',isVertical=false,splitMode=false,mirrorHost=false;
+let facing='user',gFacing='environment',isVertical=false,splitMode=true,mirrorHost=false;
 let showName=true,showBRoll=false,brollImg=null,logoImg=null;
 let virtualBGOn=false,deskPropsOn=true,customStudioImg=null;
 let recorder=null,chunks=[],isRec=false,tickerX=720,tpOn=false,tpY=45,steamPhase=0;
@@ -213,6 +220,18 @@ if(guestTarget){
   requestAnimationFrame(renderBroadcast);
 }
 
+function setMaxGuests(n){
+  maxGuests=n;
+  document.getElementById('cap1Btn').classList.toggle('on',n===1);
+  document.getElementById('cap2Btn').classList.toggle('on',n===2);
+  while(guests.length>maxGuests){
+    const extra=guests.pop();
+    try{if(extra.call)extra.call.close();}catch(e){}
+    try{if(extra.vidEl&&extra.vidEl.parentNode)extra.vidEl.parentNode.removeChild(extra.vidEl);}catch(e){}
+  }
+  updateGuestCounter();
+}
+
 function getAnswerStream(){
   ensureAudio();
   const outStream=new MediaStream();
@@ -232,10 +251,10 @@ function getAnswerStream(){
 function updateGuestCounter(){
   const el=document.getElementById('guestState');
   if(guests.length>0){
-    el.innerText=`🟢 GUESTS: ${guests.length}/${MAX_GUESTS}`;
+    el.innerText=`🟢 GUESTS: ${guests.length}/${maxGuests}`;
     el.style.color='#00e676';
   }else{
-    el.innerText=`GUESTS: 0/${MAX_GUESTS}`;
+    el.innerText=`GUESTS: 0/${maxGuests}`;
     el.style.color='var(--mut)';
   }
 }
@@ -252,16 +271,17 @@ function removeGuestByPeer(peerId){
 }
 
 function attachGuestStream(call,stream){
+  if(!stream)return;
   const peerId=call.peer;
   removeGuestByPeer(peerId);
-  if(guests.length>=MAX_GUESTS){
+  if(guests.length>=maxGuests){
     try{call.close();}catch(e){}
     return;
   }
 
   const vidEl=document.createElement('video');
   vidEl.autoplay=true;
-  vidEl.playsinline=true;
+  vidEl.playsInline=true;
   vidEl.muted=true;
   vidEl.srcObject=stream;
   vidEl.onloadedmetadata=()=>vidEl.play().catch(()=>{});
@@ -550,6 +570,10 @@ function initStudioPeer(){
   });
   peer.on('error',err=>console.warn('Studio Peer error:',err));
   peer.on('call',call=>{
+    if(guests.length>=maxGuests){
+      try{call.close();}catch(e){}
+      return;
+    }
     call.answer(getAnswerStream());
     call.on('stream',stream=>attachGuestStream(call,stream));
     call.on('close',()=>removeGuestByPeer(call.peer));
@@ -708,20 +732,26 @@ function drawCover(src,x,y,w,h,mirror=false,skipPlaceholder=false){
 }
 
 function drawMultiGuests(W,H){
-  if(guests.length===0)return;
+  const list=guests.slice(0,maxGuests);
+  if(list.length===0)return;
   if(splitMode){
-    const cols=guests.length===1?1:2;
-    const rows=Math.ceil(guests.length/cols);
+    const count=list.length;
     const areaX=isVertical?0:W*0.5;
     const areaY=isVertical?H*0.5:0;
     const areaW=isVertical?W:W*0.5;
     const areaH=isVertical?H*0.5:H;
-    const cellW=areaW/cols;
-    const cellH=areaH/rows;
 
-    guests.forEach((g,i)=>{
-      const c=i%cols,r=Math.floor(i/cols);
-      const gx=areaX+c*cellW,gy=areaY+r*cellH;
+    list.forEach((g,i)=>{
+      let gx=areaX,gy=areaY,cellW=areaW,cellH=areaH;
+      if(count===2){
+        if(isVertical){
+          cellH=areaH/2;
+          gy=areaY+i*cellH;
+        }else{
+          cellH=areaH/2;
+          gy=areaY+i*cellH;
+        }
+      }
       const hasVid=(g.vidEl.videoWidth||0)>0&&(g.vidEl.videoHeight||0)>0;
       if(hasVid){
         drawCover(g.vidEl,gx,gy,cellW,cellH,false);
@@ -731,7 +761,7 @@ function drawMultiGuests(W,H){
         ctx.fillStyle='#ffb300';
         ctx.font='bold 12px sans-serif';
         ctx.textAlign='center';
-        ctx.fillText(`GUEST ${i+1} VIDEO LOADING...`,gx+cellW/2,gy+cellH/2);
+        ctx.fillText(`GUEST ${i+1} CONNECTING...`,gx+cellW/2,gy+cellH/2);
         ctx.textAlign='left';
       }
       ctx.strokeStyle='#00e5ff';ctx.lineWidth=1.5;ctx.strokeRect(gx,gy,cellW,cellH);
@@ -739,9 +769,9 @@ function drawMultiGuests(W,H){
       ctx.fillStyle='#00e5ff';ctx.font='bold 9px sans-serif';ctx.fillText(`📡 GUEST ${i+1}`,gx+8,gy+cellH-9);
     });
   }else{
-    const pw=isVertical?115:155;
-    const ph=isVertical?82:90;
-    guests.forEach((g,i)=>{
+    const pw=isVertical?120:165;
+    const ph=isVertical?85:95;
+    list.forEach((g,i)=>{
       const px=W-pw-12;
       const py=66+i*(ph+8);
       if(py+ph>H-80)return;
@@ -754,7 +784,7 @@ function drawMultiGuests(W,H){
         ctx.fillRect(px,py,pw,ph);
         ctx.fillStyle='#ffb300';
         ctx.font='bold 9px sans-serif';
-        ctx.fillText('LOADING...',px+10,py+ph/2);
+        ctx.fillText('CONNECTING...',px+10,py+ph/2);
       }
       ctx.fillStyle='rgba(0,0,0,0.78)';ctx.fillRect(px,py+ph-17,pw,17);
       ctx.fillStyle='#00e5ff';ctx.font='bold 9px sans-serif';ctx.fillText(`📡 GUEST ${i+1}`,px+5,py+ph-5);
